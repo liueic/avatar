@@ -1,0 +1,120 @@
+# CI: test, build the multi-arch container image and publish it to GHCR.
+# Deliverable is the container (SPEC §19): every push to main and every v*
+# tag produces ghcr.io/liueic/avatar:<tag>.
+
+name: docker
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/liueic/avatar
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+      # Supply-chain signal (SPEC §17); report-only so known unfixed
+      # transitive findings do not block image delivery.
+      - name: govulncheck (report-only)
+        continue-on-error: true
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # QEMU only executes the runtime stage's apt/user setup layer for
+      # linux/arm64; the Go build itself is cross-compiled on the native
+      # builder (see Dockerfile).
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Prove the published image actually boots and serves before we call CI
+      # green: engine=none needs no model, /healthz must answer 200.
+      - name: Smoke test published image
+        if: github.event_name != 'pull_request'
+        run: |
+          IMAGE="${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
+          docker run --detach --name smoke \
+            -e AVATER_ADMIN_TOKEN=smoke \
+            -e AVATER_MODERATION_ENGINE=none \
+            -e AVATER_MODERATION_NONE_POLICY=approve \
+            -p 8080:8080 \
+            "$IMAGE"
+          ok=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/healthz > /dev/null 2>&1; then ok=1; break; fi
+            sleep 1
+          done
+          if [ -z "$ok" ]; then
+            docker logs smoke
+            echo "container did not become healthy" >&2
+            exit 1
+          fi
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080/avatar/205e460b479e2e5b48aec07710c08d50?f=y")
+          [ "$code" = "200" ] || { echo "avatar endpoint returned $code" >&2; exit 1; }
+          docker rm -f smoke > /dev/null
+          echo "smoke test passed for $IMAGE"
