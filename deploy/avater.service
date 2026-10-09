@@ -1,0 +1,42 @@
+# avater systemd unit (SPEC §19, bare-metal deployment)
+# Install:
+#   sudo cp deploy/avater.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now avater
+
+[Unit]
+Description=avater - self-hosted Gravatar-compatible avatar proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=avater
+Group=avater
+ExecStart=/usr/local/bin/avater -config /etc/avater/avater.toml
+Environment=GOMEMLIMIT=1500MiB
+Environment=GOGC=50
+WorkingDirectory=/var/lib/avater
+StateDirectory=avater
+ConfigurationDirectory=avater
+
+# Resource budget for 2 vCPU / 2 GB hosts (SPEC §19)
+MemoryMax=1.5G
+CPUQuota=180%
+
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=20s
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/avater
+
+[Install]
+WantedBy=multi-user.target

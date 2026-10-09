@@ -1,0 +1,92 @@
+# avater configuration example (SPEC §13)
+# Copy to /etc/avater/avater.toml and point AVATER_CONFIG at it.
+# Every key can be overridden by an environment variable:
+#   AVATER_<SECTION>_<FIELD> (e.g. AVATER_ADMIN_TOKEN)
+# Environment variables take precedence over this file.
+
+listen       = ":8080"
+admin_listen = "127.0.0.1:8081"   # never expose the admin port publicly
+admin_token  = ""                 # REQUIRED: start fails without it
+
+[log]
+format       = "json"             # json | text
+level        = "info"
+access_log   = false              # per-request access log (hash/status/latency only)
+client_ip_log = "none"            # none | trunc24 | full — privacy: default off
+
+[rate_limit]
+enabled      = true
+global_rps   = 200
+global_burst = 400
+per_ip_rps   = 20
+per_ip_burst = 40
+
+[upstream]
+allowed_hosts = [
+  "secure.gravatar.com",
+  "www.gravatar.com",
+  "0.gravatar.com",
+  "1.gravatar.com",
+  "2.gravatar.com",
+]
+max_bytes      = 10485760         # 10 MB response cap
+timeout        = "5s"
+dial_timeout   = "3s"
+tls_timeout    = "3s"
+rate_limit_rps = 10               # token bucket toward Gravatar
+fetch_size     = 2048             # s= used when pulling from upstream
+
+[validate]
+max_dimension = 2048
+max_pixels    = 4194304           # 2048² — decode-bomb guard
+reencode      = true              # strip EXIF/chunks, normalize (recommended)
+jpeg_quality  = 85
+
+[moderation]
+engine            = "onnx"        # onnx | none
+none_policy       = "reject"      # engine=none: approve | reject everything
+model_path        = "models/image-safety-classifier-xs.onnx"
+model_sha256      = "8c28c49d9075f3ad15ebdc2961f02d5b3f99be944815b848b49c9f0e6f3fb689"
+ort_lib_path      = "libonnxruntime.so"   # dlopen'd at runtime
+workers           = 1             # 1–2 (SPEC §13)
+queue_size        = 256
+min_interval      = "200ms"
+inference_timeout = "10s"
+max_attempts      = 3
+threshold_nsfw    = 0.5
+threshold_nsfl    = 0.5
+gray_zone_action  = "reject"      # 宁严勿宽: reject uncertain scores
+gray_zone_threshold = 0.6
+re_review_on_model_upgrade = true
+
+[cache]
+dir             = "data"
+max_bytes       = 1073741824      # 1 GB; LRU-evicted beyond this
+ttl_approved    = "720h"          # 30 days, sliding on hits
+ttl_negative    = "6h"            # network-error negatives (backs off to 24h)
+ttl_negative_404 = "24h"          # upstream says "no such avatar"
+ttl_rejected    = "2160h"         # 90 days: drop blob, keep the record
+pending_stale   = "24h"           # re-enqueue unreviewed entries
+clean_interval  = "10m"
+default_lru     = 1024
+
+[cdn]
+provider          = "none"        # none | cloudflare | fastly
+cache_tag         = true          # Cache-Tag / Surrogate-Key: av-<hash>
+purge_token       = ""            # CDN purge API token
+zone_id           = ""            # cloudflare zone
+fastly_service_id = ""            # fastly service
+ttl_pending       = "60s"         # default avatar while pending/rejected (s-maxage = 5×)
+ttl_approved      = "24h"         # browser max-age for real avatars
+ttl_approved_cdn  = "168h"        # s-maxage for real avatars
+ttl_negative      = "300s"        # 404 negative cache
+swr               = "24h"         # stale-while-revalidate (approved)
+sie               = "168h"        # stale-if-error (approved)
+
+[default_avatar]
+# Built-in styles (all CC0): thumbs, lorelei, open-peeps, identicon, pixel-art
+style       = "thumbs"            # cute orange character — the default look
+retro_style = "lorelei"           # d=retro maps here (illustrated faces)
+
+[metrics]
+enabled = false                   # serves GET /metrics

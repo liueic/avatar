@@ -1,0 +1,13 @@
+# runtime state
+data/
+bin/
+
+# models & shared libraries (fetched via `make model ort` or baked into Docker)
+models/*.onnx
+third_party/
+
+# local dev
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
