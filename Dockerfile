@@ -12,7 +12,7 @@
 #   docker build -t avater --platform linux/amd64,linux/arm64 .
 #   # single arch: docker build -t avater .
 
-ARG ORT_VERSION=1.29.0
+ARG ORT_VERSION=1.31.0
 
 # ---------------------------------------------------------------- build stage
 # Pinned to the builder's native platform: cross-compiles to TARGETARCH
@@ -47,23 +47,24 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 
 # ----------------------------------------------------------- onnxruntime stage
 # File operations only, so pin to the builder platform (no QEMU).
+# Source: the official Microsoft NuGet package — same binaries as the GitHub
+# release tarballs, but with a stable, deterministic URL.
 FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS ort
 ARG ORT_VERSION
 ARG TARGETARCH
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates unzip \
     && rm -rf /var/lib/apt/lists/*
-# Official Microsoft release tarball; API-compatible with yalue/onnxruntime_go.
 RUN case "$TARGETARCH" in \
-      amd64) ORT_ARCH=x64 ;; \
-      arm64) ORT_ARCH=arm64 ;; \
+      amd64) PKG=linux-x64 ;; \
+      arm64) PKG=linux-arm64 ;; \
       *) echo "unsupported TARGETARCH $TARGETARCH" && exit 1 ;; \
     esac \
-    && curl -fsSL -o /tmp/ort.tgz \
-       "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}.tgz" \
-    && tar -xzf /tmp/ort.tgz -C /tmp \
-    && mkdir -p /out \
-    && cp /tmp/onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}/lib/libonnxruntime.so* /out/ \
-    && rm -rf /tmp/ort.tgz /tmp/onnxruntime-linux-*
+    && mkdir -p /out /tmp/ort \
+    && curl -fsSL -o /tmp/ort.nupkg \
+       "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/${ORT_VERSION}/microsoft.ml.onnxruntime.${ORT_VERSION}.nupkg" \
+    && unzip -q /tmp/ort.nupkg "runtimes/${PKG}/native/libonnxruntime.so" -d /tmp/ort \
+    && cp /tmp/ort/runtimes/${PKG}/native/libonnxruntime.so /out/ \
+    && rm -rf /tmp/ort.nupkg /tmp/ort
 
 # -------------------------------------------------------------- model download
 # File operations only, so pin to the builder platform (no QEMU).
@@ -80,7 +81,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
     && echo "${MODEL_SHA256}  /out/models/image-safety-classifier-xs.onnx" | sha256sum -c -
 
 # ----------------------------------------------------------------- run stage
-# No RUN steps: nothing executes under emulation, so multi-arch needs no QEMU.
+# Only the single apt/user setup RUN executes under QEMU for arm64.
 FROM debian:bookworm-slim
 LABEL org.opencontainers.image.title="avater" \
       org.opencontainers.image.description="Self-hosted Gravatar-compatible avatar proxy with content moderation" \

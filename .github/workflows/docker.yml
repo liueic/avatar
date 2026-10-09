@@ -93,25 +93,26 @@ jobs:
           cache-to: type=gha,mode=max
 
       # Prove the published image actually boots and serves before we call CI
-      # green: engine=none needs no model, /healthz must answer 200.
+      # green. engine=onnx deliberately: the smoke must load the bundled
+      # onnxruntime library, verify the model digest and pass /readyz —
+      # exactly what production runs.
       - name: Smoke test published image
         if: github.event_name != 'pull_request'
         run: |
           IMAGE="${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
           docker run --detach --name smoke \
             -e AVATER_ADMIN_TOKEN=smoke \
-            -e AVATER_MODERATION_ENGINE=none \
-            -e AVATER_MODERATION_NONE_POLICY=approve \
+            -e AVATER_MODERATION_ENGINE=onnx \
             -p 8080:8080 \
             "$IMAGE"
           ok=""
-          for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/healthz > /dev/null 2>&1; then ok=1; break; fi
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/readyz > /dev/null 2>&1; then ok=1; break; fi
             sleep 1
           done
           if [ -z "$ok" ]; then
             docker logs smoke
-            echo "container did not become healthy" >&2
+            echo "container did not become ready (ORT/model load failed?)" >&2
             exit 1
           fi
           code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080/avatar/205e460b479e2e5b48aec07710c08d50?f=y")
