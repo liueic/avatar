@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/liueic/avater/internal/config"
-	"github.com/liueic/avater/internal/metrics"
+	"github.com/liueic/avatar/internal/config"
+	"github.com/liueic/avatar/internal/metrics"
 )
 
 // Kind classifies a response for cache-policy purposes (SPEC §16.1).

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liueic/avater/internal/cache"
-	"github.com/liueic/avater/internal/metrics"
+	"github.com/liueic/avatar/internal/cache"
+	"github.com/liueic/avatar/internal/metrics"
 )
 
 func TestDecideThresholds(t *testing.T) {

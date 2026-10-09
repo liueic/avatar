@@ -16,10 +16,10 @@ import (
 
 	xdraw "golang.org/x/image/draw"
 
-	"github.com/liueic/avater/internal/cache"
-	"github.com/liueic/avater/internal/cdn"
-	"github.com/liueic/avater/internal/fetcher"
-	"github.com/liueic/avater/internal/validate"
+	"github.com/liueic/avatar/internal/cache"
+	"github.com/liueic/avatar/internal/cdn"
+	"github.com/liueic/avatar/internal/fetcher"
+	"github.com/liueic/avatar/internal/validate"
 )
 
 const (

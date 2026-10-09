@@ -14,17 +14,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/liueic/avater/internal/admin"
-	"github.com/liueic/avater/internal/avatar"
-	"github.com/liueic/avater/internal/cache"
-	"github.com/liueic/avater/internal/cdn"
-	"github.com/liueic/avater/internal/cleaner"
-	"github.com/liueic/avater/internal/config"
-	"github.com/liueic/avater/internal/fetcher"
-	"github.com/liueic/avater/internal/metrics"
-	"github.com/liueic/avater/internal/moderate"
-	"github.com/liueic/avater/internal/moderate/onnx"
-	"github.com/liueic/avater/internal/server"
+	"github.com/liueic/avatar/internal/admin"
+	"github.com/liueic/avatar/internal/avatar"
+	"github.com/liueic/avatar/internal/cache"
+	"github.com/liueic/avatar/internal/cdn"
+	"github.com/liueic/avatar/internal/cleaner"
+	"github.com/liueic/avatar/internal/config"
+	"github.com/liueic/avatar/internal/fetcher"
+	"github.com/liueic/avatar/internal/metrics"
+	"github.com/liueic/avatar/internal/moderate"
+	"github.com/liueic/avatar/internal/moderate/onnx"
+	"github.com/liueic/avatar/internal/server"
 )
 
 func main() {

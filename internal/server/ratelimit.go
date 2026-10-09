@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/liueic/avater/internal/metrics"
+	"github.com/liueic/avatar/internal/metrics"
 )
 
 // limiterSet is a lazy-refill token-bucket limiter over arbitrary keys

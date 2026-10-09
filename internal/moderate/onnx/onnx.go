@@ -22,7 +22,7 @@ import (
 	"github.com/yalue/onnxruntime_go"
 	xdraw "golang.org/x/image/draw"
 
-	"github.com/liueic/avater/internal/moderate"
+	"github.com/liueic/avatar/internal/moderate"
 )
 
 // InputSize is fixed by the model graph.

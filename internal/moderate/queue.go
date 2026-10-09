@@ -16,8 +16,8 @@ import (
 
 	_ "golang.org/x/image/webp" // register decoder (first frame only)
 
-	"github.com/liueic/avater/internal/cache"
-	"github.com/liueic/avater/internal/metrics"
+	"github.com/liueic/avatar/internal/cache"
+	"github.com/liueic/avatar/internal/metrics"
 )
 
 // Purger receives hash tags whose CDN-cached content changed (SPEC §16.3).

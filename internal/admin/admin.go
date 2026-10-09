@@ -12,10 +12,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/liueic/avater/internal/cache"
-	"github.com/liueic/avater/internal/config"
-	"github.com/liueic/avater/internal/metrics"
-	"github.com/liueic/avater/internal/moderate"
+	"github.com/liueic/avatar/internal/cache"
+	"github.com/liueic/avatar/internal/config"
+	"github.com/liueic/avatar/internal/metrics"
+	"github.com/liueic/avatar/internal/moderate"
 )
 
 // HealthInfo describes the moderation engine for /admin/health.

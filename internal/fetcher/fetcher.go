@@ -38,7 +38,7 @@ type Options struct {
 	HTTPClient *http.Client
 }
 
-const defaultUA = "avater/1.0 (+https://github.com/liueic/avater)"
+const defaultUA = "avater/1.0 (+https://github.com/liueic/avatar)"
 
 // Fetcher performs whitelist-constrained upstream fetches.
 type Fetcher struct {

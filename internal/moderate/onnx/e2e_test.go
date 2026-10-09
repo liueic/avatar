@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liueic/avater/internal/cache"
-	"github.com/liueic/avater/internal/metrics"
-	"github.com/liueic/avater/internal/moderate"
+	"github.com/liueic/avatar/internal/cache"
+	"github.com/liueic/avatar/internal/metrics"
+	"github.com/liueic/avatar/internal/moderate"
 )
 
 // envOr skips the test when the model/library pair is not provisioned.

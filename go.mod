@@ -1,4 +1,4 @@
-module github.com/liueic/avater
+module github.com/liueic/avatar
 
 go 1.26.2
 
