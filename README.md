@@ -11,10 +11,6 @@ GET /avatar/<md5-or-sha256-hex>?s=80&d=identicon
 把应用里的 `https://secure.gravatar.com/avatar/` 前缀换成
 `https://your-host/avatar/` 即完成迁移，下游零改动。
 
-设计目标：**Gravatar 兼容 / 安全优先（SSRF 防护、解炸弹防护、内容审核）/
-单机 2 vCPU·2 GB 可稳定运行 / CDN 友好 / 审核引擎可替换**。完整设计见
-[SPEC.md](SPEC.md)。
-
 ---
 
 ## 工作方式
