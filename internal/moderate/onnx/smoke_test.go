@@ -7,12 +7,12 @@ import (
 )
 
 func TestRealModelSmoke(t *testing.T) {
-	if testing.Short() {
-		t.Skip("short mode")
-	}
+	// Skips when the gitignored model/library artifacts are absent (CI);
+	// envOr is shared with the end-to-end test.
+	model, lib := envOr(t)
 	m, err := New(Config{
-		ModelPath:   "../../../models/image-safety-classifier-xs.onnx",
-		ORTLibPath:  "../../../third_party/onnxruntime/lib/libonnxruntime.dylib",
+		ModelPath:   model,
+		ORTLibPath:  lib,
 		ModelSHA256: "8c28c49d9075f3ad15ebdc2961f02d5b3f99be944815b848b49c9f0e6f3fb689",
 	})
 	if err != nil {
