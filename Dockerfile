@@ -88,7 +88,7 @@ LABEL org.opencontainers.image.title="avater" \
       org.opencontainers.image.source="https://github.com/liueic/avatar" \
       org.opencontainers.image.licenses="MIT"
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates gosu \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --shell /usr/sbin/nologin avater \
     && mkdir -p /data /models && chown -R avater:avater /data /models
@@ -96,10 +96,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=build /out/avater /usr/local/bin/avater
 COPY --from=ort /out/libonnxruntime.so* /usr/local/lib/
 COPY --from=model /out/models/ /models/
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENV LD_LIBRARY_PATH=/usr/local/lib
 
-USER avater
 WORKDIR /data
 
 # Resource budget for 2 vCPU / 2 GB (SPEC §14/§19).
@@ -114,4 +115,5 @@ EXPOSE 8080 8081
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
   CMD ["/usr/local/bin/avater", "-healthcheck"]
 
-ENTRYPOINT ["/usr/local/bin/avater"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["/usr/local/bin/avater"]

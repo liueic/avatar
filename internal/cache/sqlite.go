@@ -30,7 +30,18 @@ type Store struct {
 func Open(path string) (*Store, error) {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("cache: create db dir: %w", err)
+			return nil, fmt.Errorf("cache: create db dir %q: %w", dir, err)
+		}
+		// Probe directory writability to provide a clear, actionable diagnostic
+		// error instead of cryptic SQLite error code 14 (SQLITE_CANTOPEN).
+		probe := filepath.Join(dir, fmt.Sprintf(".probe_%d", time.Now().UnixNano()))
+		if f, err := os.OpenFile(probe, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600); err != nil {
+			if errors.Is(err, os.ErrPermission) {
+				return nil, fmt.Errorf("cache: permission denied on directory %q (please check directory permissions or ownership): %w", dir, err)
+			}
+		} else {
+			_ = f.Close()
+			_ = os.Remove(probe)
 		}
 	}
 	dsn := fmt.Sprintf(
