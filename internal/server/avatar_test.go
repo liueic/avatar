@@ -41,6 +41,7 @@ type upstream struct {
 	mu     sync.Mutex
 	reqs   map[string]int
 	server *httptest.Server
+	client *http.Client
 }
 
 func newUpstream(t *testing.T) *upstream {
@@ -83,6 +84,12 @@ func newUpstream(t *testing.T) *upstream {
 	})
 	u.server = httptest.NewTLSServer(mux)
 	t.Cleanup(u.server.Close)
+	// Mirror the production fetcher policy: never follow redirects — our
+	// code must refuse to process them (SPEC §6.2.3).
+	u.client = u.server.Client()
+	u.client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
 	return u
 }
 
@@ -144,7 +151,7 @@ func newEnv(t *testing.T, tweak func(*config.Config), withModerator bool) *testE
 		Timeout:      5 * time.Second,
 		DialTimeout:  3 * time.Second,
 		TLSTimeout:   3 * time.Second,
-	}, fetcher.Options{AllowPrivateIPs: true, HTTPClient: up.server.Client()})
+	}, fetcher.Options{AllowPrivateIPs: true, HTTPClient: up.client})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,6 +347,13 @@ func TestMaliciousUpstreams(t *testing.T) {
 		if rec.Header().Get("Content-Type") != "image/svg+xml" {
 			t.Fatalf("%s: expected default avatar, got %s", h, rec.Header().Get("Content-Type"))
 		}
+		// hashBadLen fails as a transient network error and the async soft
+		// retry races the assertion; wait for the settled state.
+		waitFor(t, 3*time.Second, func() bool {
+			e, err := env.store.Get(context.Background(), h)
+			return err == nil && e.Status == cache.StatusRejectedFetch &&
+				!(e.FailReason == "network" && e.ExpiresAt <= time.Now().Unix())
+		})
 		e, err := env.store.Get(context.Background(), h)
 		if err != nil {
 			t.Fatalf("%s: no entry: %v", h, err)
@@ -676,5 +690,51 @@ func TestScaledDiskCachePersists(t *testing.T) {
 	rec2 := env.get(t, "/avatar/"+hashGood+"?s=16")
 	if rec2.Code != http.StatusOK || rec2.Body.Len() != rec.Body.Len() {
 		t.Fatal("disk-cached variant served a different body")
+	}
+}
+
+// TestNetworkNegativeHeals: a transient network negative must never 404
+// under d=404, must serve the default, and must self-heal to the real avatar
+// via the async soft retry (bounded to one attempt per interval).
+func TestNetworkNegativeHeals(t *testing.T) {
+	env := newEnv(t, nil, true)
+
+	const h = hashGood // upstream serves a JPEG for this hash
+	seedPendingEntry(t, env, h, 1)
+	// Poison it as a network negative (what a transient failure produces).
+	if err := env.store.MarkNegative(context.Background(), h, cache.AlgMD5, "network", time.Now().Add(time.Hour).Unix()); err != nil {
+		t.Fatal(err)
+	}
+
+	// d=404 on a transient negative: default avatar, never 404.
+	rec := env.get(t, "/avatar/"+h+"?d=404")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("transient negative must not 404, got %d", rec.Code)
+	}
+
+	// The soft retry fires async; wait for the entry to heal to approved.
+	waitFor(t, 5*time.Second, func() bool {
+		e, err := env.store.Get(context.Background(), h)
+		return err == nil && e.Status == cache.StatusApproved
+	})
+
+	// The healed entry serves the real image.
+	rec = env.get(t, "/avatar/"+h)
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("healed entry: %d %s", rec.Code, rec.Header().Get("Content-Type"))
+	}
+}
+
+// TestNotFoundNegativeStill404s: durable negatives keep their semantics.
+func TestNotFoundNegativeStill404s(t *testing.T) {
+	env := newEnv(t, nil, true)
+	const h = hashMiss // upstream 404s this hash
+	env.get(t, "/avatar/"+h)
+	waitFor(t, 3*time.Second, func() bool {
+		e, err := env.store.Get(context.Background(), h)
+		return err == nil && e.Status == cache.StatusRejectedFetch
+	})
+	if rec := env.get(t, "/avatar/"+h+"?d=404"); rec.Code != http.StatusNotFound {
+		t.Fatalf("not_found negative with d=404: %d, want 404", rec.Code)
 	}
 }

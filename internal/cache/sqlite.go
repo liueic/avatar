@@ -811,3 +811,20 @@ func (s *Store) NegativeCount(ctx context.Context) (int64, error) {
 		StatusPendingFetch, StatusRejectedFetch).Scan(&n)
 	return n, err
 }
+
+// ExpireNegativeNow forces a network/busy negative entry to expire so the
+// next claim (soft retry) re-fetches it immediately, regardless of its TTL.
+// Reports false when the row is not a transient negative.
+func (s *Store) ExpireNegativeNow(ctx context.Context, hash string) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE entries SET expires_at = 0
+		 WHERE hash = ? AND status = ? AND fail_reason IN (?, ?)`,
+		hash, StatusRejectedFetch, "network", "busy")
+	if err != nil {
+		return false, fmt.Errorf("cache: expire negative now: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}

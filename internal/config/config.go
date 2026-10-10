@@ -89,8 +89,11 @@ type CacheConfig struct {
 	TTLNegative404 time.Duration `toml:"ttl_negative_404"` // upstream says "no such avatar"
 	TTLRejected    time.Duration `toml:"ttl_rejected"`     // rejected blob retention
 	PendingStale   time.Duration `toml:"pending_stale"`    // re-enqueue pending_review older than this
-	CleanInterval  time.Duration `toml:"clean_interval"`
-	DefaultLRU     int           `toml:"default_lru"` // in-memory default-avatar cache entries
+	// NegativeBackoffCap bounds the exponential backoff of repeated
+	// network-error negatives so transient failures self-heal in minutes.
+	NegativeBackoffCap time.Duration `toml:"negative_backoff_cap"`
+	CleanInterval      time.Duration `toml:"clean_interval"`
+	DefaultLRU         int           `toml:"default_lru"` // in-memory default-avatar cache entries
 	// MaxNegativeEntries bounds unbounded-growth abuse: random-hash floods
 	// stop persisting negative entries beyond this many unexpired ones.
 	MaxNegativeEntries int64 `toml:"max_negative_entries"`
@@ -186,8 +189,9 @@ func Default() Config {
 	c.Cache.Dir = "data"
 	c.Cache.MaxBytes = 1 << 30 // 1 GB
 	c.Cache.TTLApproved = 30 * 24 * time.Hour
-	c.Cache.TTLNegative = 6 * time.Hour
+	c.Cache.TTLNegative = 60 * time.Second // transient: network errors heal in seconds, not hours
 	c.Cache.TTLNegative404 = 24 * time.Hour
+	c.Cache.NegativeBackoffCap = 10 * time.Minute
 	c.Cache.TTLRejected = 90 * 24 * time.Hour
 	c.Cache.PendingStale = 24 * time.Hour
 	c.Cache.CleanInterval = 10 * time.Minute
@@ -300,6 +304,9 @@ func (c *Config) Check() error {
 	}
 	if c.Cache.TTLApproved <= 0 || c.Cache.TTLNegative <= 0 || c.Cache.TTLNegative404 <= 0 {
 		return fmt.Errorf("config: cache TTLs must be positive")
+	}
+	if c.Cache.NegativeBackoffCap <= 0 {
+		c.Cache.NegativeBackoffCap = 10 * time.Minute
 	}
 	switch c.CDN.Provider {
 	case "", "none", "cloudflare", "fastly":

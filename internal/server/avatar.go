@@ -139,11 +139,13 @@ func (s *Server) serveEntry(w http.ResponseWriter, r *http.Request, req *parsedR
 	case cache.StatusApproved:
 		s.serveApproved(w, r, req, entry)
 	case cache.StatusRejectedFetch:
-		if req.d == "404" {
-			// Only "upstream has no such avatar" yields a 404 (SPEC §5).
+		if req.d == "404" && entry.FailReason != "network" && entry.FailReason != "busy" {
+			// Only "upstream has no such avatar" yields a 404 (SPEC §5);
+			// transient network negatives must never masquerade as 404.
 			s.serve404(w)
 			return
 		}
+		s.maybeSoftRetryNetworkNegative(ctx, entry)
 		s.serveDefault(w, r, req, false)
 	case cache.StatusPendingReview, cache.StatusRejected:
 		s.serveDefault(w, r, req, false)
@@ -181,9 +183,16 @@ func (s *Server) handleMiss(w http.ResponseWriter, r *http.Request, req *parsedR
 		}
 		s.serveDefault(w, r, req, false)
 	case cache.StatusRejectedFetch:
-		if req.d == "404" {
+		// Post-fetch state: not_found negatives honor d=404; transient
+		// network ones never masquerade as 404 (they may heal any second).
+		e, gerr := s.store.Get(r.Context(), req.hash)
+		transient := gerr == nil && (e.FailReason == "network" || e.FailReason == "busy")
+		if req.d == "404" && !transient {
 			s.serve404(w)
 			return
+		}
+		if gerr == nil {
+			s.maybeSoftRetryNetworkNegative(r.Context(), e)
 		}
 		s.serveDefault(w, r, req, false)
 	default:
@@ -250,10 +259,18 @@ func (s *Server) fetchAndStore(ctx context.Context, hash string) cache.Status {
 	if ferr != nil {
 		reason := "network"
 		ttl := s.cfg.Cache.TTLNegative
-		if errors.Is(ferr, fetcher.ErrNotFound) {
+		switch {
+		case errors.Is(ferr, fetcher.ErrNotFound):
 			reason = "not_found"
 			ttl = s.cfg.Cache.TTLNegative404
-		} else if failCount > 0 {
+		case errors.Is(ferr, fetcher.ErrRedirect):
+			// Deterministic hostile upstream: retrying adds nothing.
+			reason = "redirect"
+		case errors.Is(ferr, fetcher.ErrTooLarge):
+			// Same: an oversized declaration is not a transient condition.
+			reason = "too_large"
+		}
+		if reason != "not_found" && reason != "redirect" && failCount > 0 {
 			// Repeated network failures back off exponentially up to 24h
 			// (SPEC §6.3).
 			ttl = s.backoffFor(failCount)
@@ -320,16 +337,56 @@ func (s *Server) fetchAndStore(ctx context.Context, hash string) cache.Status {
 	return cache.StatusPendingReview
 }
 
-// backoffFor doubles with the failure count, capped at 24h (SPEC §6.3).
+// backoffFor doubles with the failure count, capped at negative_backoff_cap
+// (default 10m): network failures are transient and must self-heal fast
+// (SPEC §6.3, amended — a 6h sticky negative poisoned real avatars).
 func (s *Server) backoffFor(failCount int) time.Duration {
 	d := s.cfg.Cache.TTLNegative
-	for i := 1; i < failCount && d < 24*time.Hour; i++ {
+	for i := 1; i < failCount && d < s.cfg.Cache.NegativeBackoffCap; i++ {
 		d *= 2
 	}
-	if d > 24*time.Hour {
-		d = 24 * time.Hour
+	if d > s.cfg.Cache.NegativeBackoffCap {
+		d = s.cfg.Cache.NegativeBackoffCap
 	}
 	return d
+}
+
+// softRetryThrottle gates async re-fetches of network-error negatives: at
+// most one background attempt per hash per interval, so requests hitting a
+// stale negative heal it within seconds without retry storms.
+const softRetryInterval = 30 * time.Second
+
+// maybeSoftRetryNetworkNegative launches a bounded async refetch when a
+// request lands on a network-error negative entry. The current request still
+// gets the default avatar; the entry heals for the next one.
+func (s *Server) maybeSoftRetryNetworkNegative(ctx context.Context, e *cache.Entry) {
+	if e.FailReason != "network" && e.FailReason != "busy" {
+		return // durable fact (not_found) or validation failure: no retry
+	}
+	now := time.Now().Unix()
+	s.retryMu.Lock()
+	if last, ok := s.retryAt[e.Hash]; ok && now-last < int64(softRetryInterval.Seconds()) {
+		s.retryMu.Unlock()
+		return
+	}
+	if len(s.retryAt) > 50_000 {
+		s.retryAt = make(map[string]int64)
+	}
+	s.retryAt[e.Hash] = now
+	s.retryMu.Unlock()
+
+	go func() {
+		fetchCtx, cancel := context.WithTimeout(context.Background(), s.cfg.Upstream.Timeout+5*time.Second)
+		defer cancel()
+		// Force-expire the transient negative, then ride the regular claim
+		// path via singleflight (coalesces with any concurrent miss).
+		if ok, err := s.store.ExpireNegativeNow(fetchCtx, e.Hash); err != nil || !ok {
+			return
+		}
+		_, _, _ = s.sf.Do(e.Hash, func() (any, error) {
+			return s.fetchAndStore(fetchCtx, e.Hash), nil
+		})
+	}()
 }
 
 // RetryFetch lets the cleaner proactively refresh expired network-error

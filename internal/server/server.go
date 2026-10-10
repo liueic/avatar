@@ -42,6 +42,10 @@ type Server struct {
 	touchMu sync.Mutex
 	touch   map[string]int64
 
+	// retryAt throttles async re-fetches of network-error negatives.
+	retryMu sync.Mutex
+	retryAt map[string]int64
+
 	// scaledCache memoizes resized approved images for common small sizes.
 	scaled *avatar.LRU
 	// scaledDisk persists scaled variants across restarts (LRU is only the
@@ -77,6 +81,7 @@ func New(d Deps) (*Server, error) {
 		log:     d.Log,
 		reg:     d.Reg,
 		touch:   make(map[string]int64, 1024),
+		retryAt: make(map[string]int64, 1024),
 		scaled:  avatar.NewLRU(1024),
 	}
 	if d.Cfg.RateLimit.Enabled {

@@ -204,6 +204,9 @@ func (c *Config) applyEnv() error {
 	if err := dur("AVATER_CACHE_PENDING_STALE", &c.Cache.PendingStale); err != nil {
 		return err
 	}
+	if err := dur("AVATER_CACHE_NEGATIVE_BACKOFF_CAP", &c.Cache.NegativeBackoffCap); err != nil {
+		return err
+	}
 	if err := dur("AVATER_CACHE_CLEAN_INTERVAL", &c.Cache.CleanInterval); err != nil {
 		return err
 	}
