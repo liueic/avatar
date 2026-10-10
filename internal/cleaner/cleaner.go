@@ -6,7 +6,11 @@ package cleaner
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/liueic/avatar/internal/cache"
@@ -147,7 +151,12 @@ func (c *Cleaner) RunOnce(ctx context.Context) error {
 		}
 	}
 
-	// 6. SQLite housekeeping.
+	// 6. Default-avatar disk cache bound (abuse resilience).
+	if err := c.PruneDefaultCache(); err != nil {
+		c.log.Warn("cleaner: defaults prune", "err", err)
+	}
+
+	// 7. SQLite housekeeping.
 	if err := c.store.Optimize(ctx); err != nil {
 		c.log.Debug("cleaner: pragma optimize", "err", err)
 	}
@@ -179,5 +188,62 @@ func (c *Cleaner) OrphanScan(ctx context.Context) error {
 		c.log.Info("orphan scan: removed unreferenced blobs", "count", orphans)
 		c.reg.Counter("avater_cleaner_orphans_total", "Orphan blobs removed at startup", nil, float64(orphans))
 	}
+	return nil
+}
+
+// PruneDefaultCache bounds the defaults disk cache ({cache.dir}/defaults):
+// when it exceeds default_avatar.disk_max_bytes, oldest-mtime files are
+// removed until usage drops to 90% of the cap (abuse resilience: random-hash
+// PNG floods would otherwise fill the disk).
+func (c *Cleaner) PruneDefaultCache() error {
+	root := filepath.Join(c.cfg.Cache.Dir, "defaults")
+	limit := c.cfg.DefaultAvatr.DiskMaxBytes
+	if limit <= 0 {
+		limit = 256 << 20
+	}
+
+	type file struct {
+		path  string
+		size  int64
+		mtime time.Time
+	}
+	var files []file
+	var total int64
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !d.Type().IsRegular() {
+			return nil //nolint: walk errors on a cache dir are non-fatal
+		}
+		info, ierr := d.Info()
+		if ierr != nil {
+			return nil
+		}
+		files = append(files, file{path, info.Size(), info.ModTime()})
+		total += info.Size()
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if total <= limit {
+		c.reg.Gauge("avater_defaults_cache_bytes", "Bytes cached for default avatars on disk", nil, float64(total))
+		return nil
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].mtime.Before(files[j].mtime) })
+	target := limit * 9 / 10
+	removed := 0
+	for _, f := range files {
+		if total <= target {
+			break
+		}
+		if os.Remove(f.path) == nil {
+			total -= f.size
+			removed++
+		}
+	}
+	if removed > 0 {
+		c.log.Warn("cleaner: pruned default-avatar disk cache", "files", removed, "bytes_before", total)
+		c.reg.Counter("avater_cleaner_defaults_pruned_total", "Default-avatar cache files pruned", nil, float64(removed))
+	}
+	c.reg.Gauge("avater_defaults_cache_bytes", "Bytes cached for default avatars on disk", nil, float64(total))
 	return nil
 }

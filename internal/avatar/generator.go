@@ -54,18 +54,26 @@ type Generator struct {
 	disk string // defaults cache dir
 	mem  *LRU
 
+	// maxRaster caps PNG rasterization: SVG is resolution-independent, so
+	// oversized renders only serve CPU/disk exhaustion attacks (README 限流).
+	maxRaster int
+
 	renderMu sync.Mutex // dicebear Style reuse is not documented as goroutine-safe
 }
 
 // NewGenerator parses the built-in styles and prepares the disk cache under
 // cacheDir/defaults.
-func NewGenerator(cacheDir, defaultStyle, retroStyle string, lruSize int) (*Generator, error) {
+func NewGenerator(cacheDir, defaultStyle, retroStyle string, lruSize int, maxRaster int) (*Generator, error) {
+	if maxRaster <= 0 {
+		maxRaster = 512
+	}
 	g := &Generator{
 		styles:       make(map[string]*dicebear.Style, len(builtins)),
 		defaultStyle: defaultStyle,
 		retroStyle:   retroStyle,
 		disk:         filepath.Join(cacheDir, "defaults"),
 		mem:          NewLRU(lruSize),
+		maxRaster:    maxRaster,
 	}
 	for name, def := range builtins {
 		st, err := dicebear.NewStyle(def)
@@ -111,6 +119,11 @@ func (g *Generator) PNG(styleName, hash string, size int) ([]byte, error) {
 }
 
 func (g *Generator) get(styleName, hash string, size int, format string) ([]byte, error) {
+	// Clamp oversized PNG renders before the cache key so every >max size
+	// shares one cached bitmap.
+	if format == "png" && size > g.maxRaster {
+		size = g.maxRaster
+	}
 	key := styleName + "/" + hash + "/" + format + "/" + itoa(size)
 	if b, ok := g.mem.Get(key); ok {
 		return b, nil

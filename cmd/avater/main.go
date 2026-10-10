@@ -76,7 +76,7 @@ func run() error {
 	}
 
 	// Default-avatar generator (DiceBear, deterministic — SPEC §8).
-	avatars, err := avatar.NewGenerator(cfg.Cache.Dir, cfg.DefaultAvatr.Style, cfg.DefaultAvatr.RetroStyle, cfg.Cache.DefaultLRU)
+	avatars, err := avatar.NewGenerator(cfg.Cache.Dir, cfg.DefaultAvatr.Style, cfg.DefaultAvatr.RetroStyle, cfg.Cache.DefaultLRU, cfg.DefaultAvatr.MaxRasterSize)
 	if err != nil {
 		return err
 	}

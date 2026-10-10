@@ -10,7 +10,7 @@ const testHash32 = "0123abcd0123abcd0123abcd0123abcd"
 
 func newGen(t *testing.T) *Generator {
 	t.Helper()
-	g, err := NewGenerator(t.TempDir(), "thumbs", "lorelei", 64)
+	g, err := NewGenerator(t.TempDir(), "thumbs", "lorelei", 64, 512)
 	if err != nil {
 		t.Fatalf("generator: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestDeterministic(t *testing.T) {
 	}
 
 	// Through the disk-cache path too (fresh generator, same dir semantics).
-	g2, err := NewGenerator(t.TempDir(), "identicon", "pixel-art", 64)
+	g2, err := NewGenerator(t.TempDir(), "identicon", "pixel-art", 64, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestStyleForDMapping(t *testing.T) {
 }
 
 func TestUnknownStyleRejected(t *testing.T) {
-	if _, err := NewGenerator(t.TempDir(), "nope", "lorelei", 8); err == nil {
+	if _, err := NewGenerator(t.TempDir(), "nope", "lorelei", 8, 512); err == nil {
 		t.Fatal("unknown default style must be rejected at startup")
 	}
 }
@@ -122,5 +122,25 @@ func TestLRUEviction(t *testing.T) {
 	}
 	if c.Len() != 2 {
 		t.Fatalf("len = %d, want 2", c.Len())
+	}
+}
+
+// TestPNGRasterClamped guards the CPU/ disk-exhaustion mitigation: oversized
+// PNG requests render at maxRaster and share one cache entry.
+func TestPNGRasterClamped(t *testing.T) {
+	g, err := NewGenerator(t.TempDir(), "thumbs", "lorelei", 64, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := g.PNG("thumbs", testHash32, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := img.Bounds(); b.Dx() != 64 || b.Dy() != 64 {
+		t.Fatalf("clamped raster = %v, want 64x64", b)
 	}
 }

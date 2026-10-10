@@ -131,7 +131,7 @@ func newEnv(t *testing.T, tweak func(*config.Config), withModerator bool) *testE
 	if err != nil {
 		t.Fatal(err)
 	}
-	avatars, err := avatar.NewGenerator(cfg.Cache.Dir, cfg.DefaultAvatr.Style, cfg.DefaultAvatr.RetroStyle, 64)
+	avatars, err := avatar.NewGenerator(cfg.Cache.Dir, cfg.DefaultAvatr.Style, cfg.DefaultAvatr.RetroStyle, 64, cfg.DefaultAvatr.MaxRasterSize)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -586,5 +586,49 @@ func TestPNGDefaultOutput(t *testing.T) {
 	}
 	if img.Bounds().Dx() != 80 {
 		t.Fatalf("default png size = %v", img.Bounds())
+	}
+}
+
+// TestMissShedsWhenUpstreamSaturated: once the upstream token bucket is
+// exhausted, random-hash misses must serve the default avatar immediately and
+// persist nothing (no pending_fetch, no negative entry).
+func TestMissShedsWhenUpstreamSaturated(t *testing.T) {
+	env := newEnv(t, func(c *config.Config) {
+		c.Upstream.TokenWait = 0 // fail fast, no waiting at all
+	}, true)
+
+	// Drain the whole bucket (test env builds burst=1000; refills at 1000/s
+	// make a bounded loop race, so keep trying until it reports empty).
+	ctx := context.Background()
+	for i := 0; i < 5000; i++ {
+		if !env.upTB.TryAcquire(ctx, 0) {
+			break
+		}
+	}
+
+	const h = "77777777777777777777777777777777"
+	rec := env.get(t, "/avatar/"+h)
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "image/svg+xml" {
+		t.Fatalf("shed miss: %d %s", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if _, err := env.store.Get(ctx, h); err != cache.ErrNotFound {
+		t.Fatalf("shed miss must not persist an entry, got %v", err)
+	}
+}
+
+// TestMissShedsAtNegativeCap: with the negative-entry cap at zero, misses are
+// never persisted (and the default avatar is still served).
+func TestMissShedsAtNegativeCap(t *testing.T) {
+	env := newEnv(t, func(c *config.Config) {
+		c.Cache.MaxNegativeEntries = 0
+	}, true)
+
+	const h = "88888888888888888888888888888888"
+	rec := env.get(t, "/avatar/"+h)
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "image/svg+xml" {
+		t.Fatalf("cap miss: %d %s", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if _, err := env.store.Get(context.Background(), h); err != cache.ErrNotFound {
+		t.Fatalf("capped miss must not persist an entry, got %v", err)
 	}
 }

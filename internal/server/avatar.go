@@ -22,6 +22,12 @@ import (
 	"github.com/liueic/avatar/internal/validate"
 )
 
+// fetchBusy is a transient miss outcome: the upstream budget or the negative
+// entry cap is exhausted, so the request is served the default avatar with
+// nothing persisted. It never reaches the database (abuse resilience — see
+// the rate-limit notes in README).
+const fetchBusy = cache.Status("busy")
+
 const (
 	// DefaultSize is the Gravatar default size parameter.
 	DefaultSize = 80
@@ -158,6 +164,13 @@ func (s *Server) handleMiss(w http.ResponseWriter, r *http.Request, req *parsedR
 	})
 	outcome, _ := res.(cache.Status)
 
+	if outcome == fetchBusy {
+		// Under load-shedding: default avatar, no state, d=404 does not 404
+		// (upstream availability is simply unknown).
+		s.serveDefault(w, r, req, false)
+		return
+	}
+
 	switch outcome {
 	case cache.StatusApproved:
 		// Practically unreachable on a fresh miss; handled for completeness.
@@ -185,6 +198,22 @@ func (s *Server) fetchAndStore(ctx context.Context, hash string) cache.Status {
 	alg := cache.AlgForHash(hash)
 	now := time.Now().Unix()
 	failCount := 0
+
+	// Abuse gate 1: upstream pacing. Consume the token up front with a
+	// bounded wait; when the bucket is saturated we shed load immediately
+	// instead of pinning connections for the whole fetch timeout.
+	if !s.upTB.TryAcquire(ctx, s.cfg.Upstream.TokenWait) {
+		s.reg.Counter("avater_upstream_requests_total", "Upstream fetches by outcome", map[string]string{"outcome": "busy"}, 1)
+		return fetchBusy
+	}
+	// Abuse gate 2: negative-entry growth cap. Random-hash floods stop
+	// persisting (and stop fetching) once too many unexpired negatives exist.
+	if max := s.cfg.Cache.MaxNegativeEntries; max >= 0 {
+		if n, err := s.store.NegativeCount(ctx); err == nil && n >= max {
+			s.reg.Counter("avater_negative_cap_skips_total", "Misses shed because the negative-entry cap was reached", nil, 1)
+			return fetchBusy
+		}
+	}
 
 	created, _ := s.store.InsertPendingFetch(ctx, hash, alg, now+int64((60*time.Second).Seconds()))
 	if !created {
@@ -217,7 +246,7 @@ func (s *Server) fetchAndStore(ctx context.Context, hash string) cache.Status {
 		}
 	}
 
-	res, ferr := s.fetch.Fetch(ctx, hash, s.cfg.Upstream.FetchSize, s.upTB)
+	res, ferr := s.fetch.Fetch(ctx, hash, s.cfg.Upstream.FetchSize)
 	if ferr != nil {
 		reason := "network"
 		ttl := s.cfg.Cache.TTLNegative

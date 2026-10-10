@@ -800,3 +800,14 @@ func (s *Store) Optimize(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `PRAGMA optimize`)
 	return err
 }
+
+// NegativeCount returns the number of unexpired pending_fetch and
+// rejected_fetch rows. The server gates new misses on this so a random-hash
+// flood cannot grow the database without bound (SPEC §17 滥用防护).
+func (s *Store) NegativeCount(ctx context.Context) (int64, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM entries WHERE status IN (?, ?)`,
+		StatusPendingFetch, StatusRejectedFetch).Scan(&n)
+	return n, err
+}

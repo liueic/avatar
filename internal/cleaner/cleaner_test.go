@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"testing"
 	"time"
 
@@ -148,4 +149,36 @@ func TestStalePendingReenqueue(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = retr
+}
+
+func TestPruneDefaultCache(t *testing.T) {
+	c, _, _, _ := newCleaner(t)
+	c.cfg.DefaultAvatr.DiskMaxBytes = 1000 // tiny cap for the test
+
+	root := c.cfg.Cache.Dir + "/defaults"
+	for i, name := range []string{"old.png", "mid.png", "new.png"} {
+		dir := root + "/thumbs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		p := dir + "/" + name
+		if err := os.WriteFile(p, make([]byte, 800), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// Order files by mtime: old < mid < new.
+		mt := time.Now().Add(-time.Duration(3-i) * time.Hour)
+		if err := os.Chtimes(p, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := c.PruneDefaultCache(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(root + "/thumbs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/old.png"); !os.IsNotExist(err) {
+		t.Fatal("oldest file must be pruned")
+	}
+	if _, err := os.Stat(root + "/thumbs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/new.png"); err != nil {
+		t.Fatal("newest file must survive")
+	}
 }

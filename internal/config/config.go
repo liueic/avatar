@@ -53,6 +53,7 @@ type UpstreamConfig struct {
 	RateLimitRPS   float64       `toml:"rate_limit_rps"`
 	RateLimitBurst int           `toml:"rate_limit_burst"`
 	FetchSize      int           `toml:"fetch_size"` // s= param used when pulling from upstream
+	TokenWait      time.Duration `toml:"token_wait"` // max wait for an upstream slot before failing fast
 }
 
 type ValidateConfig struct {
@@ -90,6 +91,9 @@ type CacheConfig struct {
 	PendingStale   time.Duration `toml:"pending_stale"`    // re-enqueue pending_review older than this
 	CleanInterval  time.Duration `toml:"clean_interval"`
 	DefaultLRU     int           `toml:"default_lru"` // in-memory default-avatar cache entries
+	// MaxNegativeEntries bounds unbounded-growth abuse: random-hash floods
+	// stop persisting negative entries beyond this many unexpired ones.
+	MaxNegativeEntries int64 `toml:"max_negative_entries"`
 }
 
 type CDNConfig struct {
@@ -109,6 +113,12 @@ type CDNConfig struct {
 type DefaultAvatarConfig struct {
 	Style      string `toml:"style"`       // identicon (default), pixel-art
 	RetroStyle string `toml:"retro_style"` // style used for d=retro
+	// MaxRasterSize caps PNG rasterization of default avatars: SVG is
+	// resolution-independent, so giant PNG renders only serve CPU-exhaustion
+	// attacks. Requests above this get the capped render.
+	MaxRasterSize int `toml:"max_raster_size"`
+	// DiskMaxBytes bounds the defaults disk cache; the cleaner prunes it LRU.
+	DiskMaxBytes int64 `toml:"disk_max_bytes"`
 }
 
 type MetricsConfig struct {
@@ -147,6 +157,7 @@ func Default() Config {
 	c.Upstream.RateLimitRPS = 10
 	c.Upstream.RateLimitBurst = 20
 	c.Upstream.FetchSize = 2048
+	c.Upstream.TokenWait = time.Second
 
 	c.Validate.MaxDimension = 2048
 	c.Validate.MaxPixels = 2048 * 2048
@@ -178,6 +189,7 @@ func Default() Config {
 	c.Cache.PendingStale = 24 * time.Hour
 	c.Cache.CleanInterval = 10 * time.Minute
 	c.Cache.DefaultLRU = 1024
+	c.Cache.MaxNegativeEntries = 100_000
 
 	c.CDN.Provider = "none"
 	c.CDN.CacheTag = true
@@ -188,8 +200,10 @@ func Default() Config {
 	c.CDN.SWR = 24 * time.Hour
 	c.CDN.SIE = 7 * 24 * time.Hour
 
-	c.DefaultAvatr.Style = "thumbs"   // cute DiceBear style (CC0)
+	c.DefaultAvatr.Style = "thumbs" // cute DiceBear style (CC0)
 	c.DefaultAvatr.RetroStyle = "lorelei"
+	c.DefaultAvatr.MaxRasterSize = 512
+	c.DefaultAvatr.DiskMaxBytes = 256 << 20 // 256 MB
 
 	c.Metrics.Enabled = false
 	return c
@@ -312,6 +326,12 @@ func (c *Config) Check() error {
 	}
 	if c.DefaultAvatr.RetroStyle == "" {
 		c.DefaultAvatr.RetroStyle = "pixel-art"
+	}
+	if c.DefaultAvatr.MaxRasterSize <= 0 {
+		c.DefaultAvatr.MaxRasterSize = 512
+	}
+	if c.DefaultAvatr.DiskMaxBytes <= 0 {
+		c.DefaultAvatr.DiskMaxBytes = 256 << 20
 	}
 	return nil
 }

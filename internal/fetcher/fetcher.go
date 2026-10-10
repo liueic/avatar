@@ -120,6 +120,30 @@ func (tb *TokenBucket) Acquire(ctx context.Context) error {
 	}
 }
 
+// TryAcquire consumes a token, waiting at most maxWait. It reports false when
+// no token became available in time — callers must fail fast instead of
+// pinning connections behind a saturated upstream (abuse resilience).
+func (tb *TokenBucket) TryAcquire(ctx context.Context, maxWait time.Duration) bool {
+	select {
+	case <-tb.mu:
+		return true
+	default:
+	}
+	if maxWait <= 0 {
+		return false
+	}
+	t := time.NewTimer(maxWait)
+	defer t.Stop()
+	select {
+	case <-tb.mu:
+		return true
+	case <-t.C:
+		return false
+	case <-ctx.Done():
+		return false
+	}
+}
+
 // New constructs a Fetcher from config and options.
 func New(cfg Config, opts Options) (*Fetcher, error) {
 	if len(cfg.AllowedHosts) == 0 {
@@ -256,12 +280,7 @@ type FetchResult struct {
 
 // Fetch pulls the avatar for hash. The returned error wraps ErrNotFound when
 // the upstream reports no avatar (HTTP 404), enabling negative caching.
-func (f *Fetcher) Fetch(ctx context.Context, hash string, size int, tb *TokenBucket) (*FetchResult, error) {
-	if tb != nil {
-		if err := tb.Acquire(ctx); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrRateLimited, err)
-		}
-	}
+func (f *Fetcher) Fetch(ctx context.Context, hash string, size int) (*FetchResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, f.timeout)
 	defer cancel()
 

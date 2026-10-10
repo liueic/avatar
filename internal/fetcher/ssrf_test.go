@@ -1,8 +1,10 @@
 package fetcher
 
 import (
+	"context"
 	"net/netip"
 	"testing"
+	"time"
 )
 
 // TestCheckIPReservedRanges is the SPEC §18 table-driven SSRF test: every
@@ -111,5 +113,39 @@ func TestNewRejectsBadConfig(t *testing.T) {
 	}
 	if _, err := New(Config{AllowedHosts: []string{"a.com"}, MaxBytes: 0}, Options{}); err == nil {
 		t.Error("zero max bytes must be rejected")
+	}
+}
+
+func TestTokenBucketTryAcquire(t *testing.T) {
+	tb := NewTokenBucket(1000, 2)
+	defer tb.Stop()
+	ctx := context.Background()
+
+	if !tb.TryAcquire(ctx, 0) {
+		t.Fatal("fresh bucket must grant a token immediately")
+	}
+	if !tb.TryAcquire(ctx, 0) {
+		t.Fatal("second token must be granted (burst=2)")
+	}
+	if tb.TryAcquire(ctx, 0) {
+		t.Fatal("exhausted bucket with zero wait must fail fast")
+	}
+	if tb.TryAcquire(ctx, time.Millisecond) {
+		t.Fatal("1ms wait against a 1s-interval bucket must fail")
+	}
+}
+
+func TestFetchRejectsWithoutBucketToken(t *testing.T) {
+	// The caller now owns pacing; Fetch itself must not block.
+	f, err := New(Config{AllowedHosts: []string{"secure.gravatar.com"}, MaxBytes: 1024}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	// No token bucket passed in anymore — a request against a dead network
+	// fails on its own context, not on bucket wait.
+	if _, err := f.Fetch(ctx, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 64); err == nil {
+		t.Fatal("expected network error")
 	}
 }

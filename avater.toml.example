@@ -34,6 +34,7 @@ timeout        = "5s"
 dial_timeout   = "3s"
 tls_timeout    = "3s"
 rate_limit_rps = 10               # token bucket toward Gravatar
+token_wait     = "1s"             # fail fast when the bucket is empty (load shedding)
 fetch_size     = 2048             # s= used when pulling from upstream
 
 [validate]
@@ -69,6 +70,7 @@ ttl_rejected    = "2160h"         # 90 days: drop blob, keep the record
 pending_stale   = "24h"           # re-enqueue unreviewed entries
 clean_interval  = "10m"
 default_lru     = 1024
+max_negative_entries = 100000     # stop persisting misses beyond this (abuse guard)
 
 [cdn]
 provider          = "none"        # none | cloudflare | fastly
@@ -87,6 +89,8 @@ sie               = "168h"        # stale-if-error (approved)
 # Built-in styles (all CC0): thumbs, lorelei, open-peeps, identicon, pixel-art
 style       = "thumbs"            # cute orange character — the default look
 retro_style = "lorelei"           # d=retro maps here (illustrated faces)
+max_raster_size = 512             # cap PNG renders (SVG scales anyway); anti CPU-burn
+disk_max_bytes = 268435456        # 256 MB defaults disk cache, LRU-pruned by the cleaner
 
 [metrics]
 enabled = false                   # serves GET /metrics

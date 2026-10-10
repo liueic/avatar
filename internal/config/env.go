@@ -134,6 +134,9 @@ func (c *Config) applyEnv() error {
 	if err := integer("AVATER_UPSTREAM_FETCH_SIZE", &c.Upstream.FetchSize); err != nil {
 		return err
 	}
+	if err := dur("AVATER_UPSTREAM_TOKEN_WAIT", &c.Upstream.TokenWait); err != nil {
+		return err
+	}
 
 	if err := integer("AVATER_VALIDATE_MAX_DIMENSION", &c.Validate.MaxDimension); err != nil {
 		return err
@@ -207,6 +210,9 @@ func (c *Config) applyEnv() error {
 	if err := integer("AVATER_CACHE_DEFAULT_LRU", &c.Cache.DefaultLRU); err != nil {
 		return err
 	}
+	if err := i64("AVATER_CACHE_MAX_NEGATIVE_ENTRIES", &c.Cache.MaxNegativeEntries); err != nil {
+		return err
+	}
 
 	str("AVATER_CDN_PROVIDER", &c.CDN.Provider)
 	if err := boolean("AVATER_CDN_CACHE_TAG", &c.CDN.CacheTag); err != nil {
@@ -236,6 +242,12 @@ func (c *Config) applyEnv() error {
 
 	str("AVATER_DEFAULT_AVATAR_STYLE", &c.DefaultAvatr.Style)
 	str("AVATER_DEFAULT_AVATAR_RETRO_STYLE", &c.DefaultAvatr.RetroStyle)
+	if err := integer("AVATER_DEFAULT_AVATAR_MAX_RASTER_SIZE", &c.DefaultAvatr.MaxRasterSize); err != nil {
+		return err
+	}
+	if err := i64("AVATER_DEFAULT_AVATAR_DISK_MAX_BYTES", &c.DefaultAvatr.DiskMaxBytes); err != nil {
+		return err
+	}
 
 	if err := boolean("AVATER_METRICS_ENABLED", &c.Metrics.Enabled); err != nil {
 		return err
