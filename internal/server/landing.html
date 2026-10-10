@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>avater · 自托管的 Gravatar 兼容头像代理</title>
+<meta name="description" content="avater 是轻量级自托管 Gravatar 兼容头像代理：内置本地 AI 内容合规审核、确定性兜底头像、零外部重依赖。">
+<style>
+  :root {
+    --accent: #2563eb;
+    --accent-soft: #eff6ff;
+    --text: #111827;
+    --text-secondary: #4b5563;
+    --text-muted: #6b7280;
+    --border: #e5e7eb;
+    --bg-soft: #f9fafb;
+    --code-bg: #f3f4f6;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB",
+      "Microsoft YaHei", sans-serif;
+    color: var(--text);
+    background: #ffffff;
+    line-height: 1.6;
+  }
+  code, pre, .mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+      "Liberation Mono", monospace;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+  /* --- nav --- */
+  nav {
+    border-bottom: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.9);
+  }
+  nav .wrap {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 60px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
+  .brand img { width: 28px; height: 28px; border-radius: 8px; display: block; }
+  .nav-link { font-size: 14px; color: var(--text-secondary); font-weight: 500; }
+
+  /* --- hero --- */
+  .hero { text-align: center; padding: 72px 0 56px; }
+  .badge {
+    display: inline-block; font-size: 13px; font-weight: 600;
+    color: var(--accent); background: var(--accent-soft);
+    border: 1px solid #bfdbfe; border-radius: 999px;
+    padding: 4px 14px; margin-bottom: 20px;
+  }
+  .hero h1 {
+    font-size: clamp(28px, 5vw, 42px); font-weight: 800;
+    letter-spacing: -0.02em; line-height: 1.2;
+  }
+  .hero p.sub {
+    margin: 16px auto 0; max-width: 620px;
+    font-size: 17px; color: var(--text-secondary);
+  }
+  .cta { margin-top: 28px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 10px 22px; border-radius: 8px;
+    font-size: 15px; font-weight: 600; border: 1px solid var(--border);
+  }
+  .btn:hover { text-decoration: none; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-ghost { background: #fff; color: var(--text); }
+  .btn-ghost:hover { background: var(--bg-soft); }
+  .avatar-strip {
+    margin-top: 40px; display: flex; justify-content: center; gap: 14px;
+  }
+  .avatar-strip img {
+    width: 56px; height: 56px; border-radius: 50%;
+    border: 1px solid var(--border); background: var(--bg-soft);
+  }
+
+  /* --- code block --- */
+  .codeblock {
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px 20px;
+    overflow-x: auto; font-size: 14px; line-height: 1.7;
+  }
+  .codeblock .comment { color: var(--text-muted); }
+  .codeblock .hl { color: var(--accent); font-weight: 600; }
+
+  /* --- sections --- */
+  section { padding: 56px 0; }
+  section + section { border-top: 1px solid var(--border); }
+  .section-title { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 8px; }
+  .section-sub { color: var(--text-secondary); margin-bottom: 32px; max-width: 640px; }
+
+  .grid {
+    display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+  .card {
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 22px; background: #fff;
+  }
+  .card h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+  .card p { font-size: 14px; color: var(--text-secondary); }
+  .card .icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 36px; height: 36px; border-radius: 9px;
+    background: var(--accent-soft); margin-bottom: 12px;
+    font-size: 18px; line-height: 1;
+  }
+
+  /* --- steps --- */
+  .steps { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .step {
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 22px; background: var(--bg-soft);
+  }
+  .step .num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--accent); color: #fff;
+    font-size: 13px; font-weight: 700; margin-bottom: 10px;
+  }
+  .step h3 { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+  .step p { font-size: 14px; color: var(--text-secondary); }
+  .step code {
+    background: #fff; border: 1px solid var(--border); border-radius: 5px;
+    padding: 1px 6px; font-size: 13px;
+  }
+
+  /* --- hosting --- */
+  .hosting-grid {
+    display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+  .hosting-grid .card ul { list-style: none; margin-top: 4px; }
+  .hosting-grid .card li {
+    font-size: 14px; color: var(--text-secondary); padding: 4px 0;
+  }
+  .hosting-grid .card li strong { color: var(--text); font-weight: 600; }
+
+  /* --- footer --- */
+  footer {
+    border-top: 1px solid var(--border); padding: 32px 0 48px;
+    font-size: 13px; color: var(--text-muted);
+  }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <div class="brand">
+      <img src="/avatar/00000000000000000000000000000001?s=56&amp;f=y" alt="" width="28" height="28">
+      avater
+    </div>
+    <a class="nav-link" href="https://github.com/liueic/avatar">GitHub</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="badge">开源 · MIT License</span>
+    <h1>自托管的 Gravatar 兼容头像代理</h1>
+    <p class="sub">
+      内置本地 AI 内容合规审核，确定性兜底头像，零外部重依赖。
+      把头像 URL 中的 Gravatar 域名换成本服务，即完成零改动接入。
+    </p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/liueic/avatar">GitHub 仓库</a>
+      <a class="btn btn-ghost" href="#usage">接入方式</a>
+    </div>
+    <div class="avatar-strip" aria-hidden="true">
+      <img src="/avatar/00000000000000000000000000000002?s=112&amp;f=y" alt="" width="56" height="56">
+      <img src="/avatar/00000000000000000000000000000003?s=112&amp;f=y" alt="" width="56" height="56">
+      <img src="/avatar/00000000000000000000000000000004?s=112&amp;f=y" alt="" width="56" height="56">
+      <img src="/avatar/00000000000000000000000000000005?s=112&amp;f=y" alt="" width="56" height="56">
+      <img src="/avatar/00000000000000000000000000000006?s=112&amp;f=y" alt="" width="56" height="56">
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2 class="section-title">核心特性</h2>
+    <p class="section-sub">为社区、博客与协作平台解决头像接入的合规、延迟与架构三大痛点。</p>
+    <div class="grid">
+      <div class="card">
+        <span class="icon">🔄</span>
+        <h3>Gravatar 原生兼容</h3>
+        <p>完整支持 MD5 / SHA-256 哈希、尺寸裁剪、强制默认图与 .jpg/.png 后缀协商，下游零改动接入。</p>
+      </div>
+      <div class="card">
+        <span class="icon">🛡️</span>
+        <h3>本地 AI 内容审核</h3>
+        <p>内置轻量 ONNX 模型执行 SFW / NSFW / NSFL 三分类检测，CPU 单张推理仅数十毫秒，原图未审绝不外发。</p>
+      </div>
+      <div class="card">
+        <span class="icon">🎨</span>
+        <h3>确定性兜底头像</h3>
+        <p>待审核或被拦截时，基于哈希种子实时渲染 DiceBear 几何/插画面孔，同一哈希输出永远一致。</p>
+      </div>
+      <div class="card">
+        <span class="icon">📦</span>
+        <h3>零外部重依赖</h3>
+        <p>元数据使用嵌入式 SQLite（WAL），图片存本地磁盘，无需 Redis 或消息中间件，单二进制即可运行。</p>
+      </div>
+      <div class="card">
+        <span class="icon">🔒</span>
+        <h3>生产级安全防护</h3>
+        <p>SSRF 白名单与 IP 校验、解压缩炸弹防护、魔数嗅探与 EXIF 剥离重编码，深度防御。</p>
+      </div>
+      <div class="card">
+        <span class="icon">⚡</span>
+        <h3>CDN 友好</h3>
+        <p>精确细分的 Cache-Control 策略，支持 Cloudflare Cache-Tag 与 Fastly Surrogate-Key 毫秒级主动失效。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="usage">
+  <div class="wrap">
+    <h2 class="section-title">三步接入</h2>
+    <p class="section-sub">任何已使用 Gravatar 的应用，只需替换域名即可迁移到本服务。</p>
+    <div class="steps">
+      <div class="step">
+        <span class="num">1</span>
+        <h3>计算邮箱哈希</h3>
+        <p>对用户邮箱取 <code>md5</code> 或 <code>sha256</code>，与 Gravatar 规则完全一致。</p>
+      </div>
+      <div class="step">
+        <span class="num">2</span>
+        <h3>替换请求域名</h3>
+        <p>将 <code>secure.gravatar.com</code> 替换为 <code>avater.juniortree.com</code>。</p>
+      </div>
+      <div class="step">
+        <span class="num">3</span>
+        <h3>完成</h3>
+        <p>尺寸、默认图等查询参数原样保留，无需任何其他改动。</p>
+      </div>
+    </div>
+    <div class="codeblock" style="margin-top: 24px;">
+<span class="comment"># 之前</span><br>
+GET https://secure.gravatar.com/avatar/<span class="hl">&lt;md5-or-sha256&gt;</span>?s=80&amp;d=identicon<br>
+<br>
+<span class="comment"># 之后（本实例）</span><br>
+GET https://avater.juniortree.com/avatar/<span class="hl">&lt;md5-or-sha256&gt;</span>?s=80&amp;d=identicon
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 class="section-title">托管与部署</h2>
+    <p class="section-sub">本页面由公开开源项目自托管运行，你也可以用一条命令部署自己的实例。</p>
+    <div class="hosting-grid">
+      <div class="card">
+        <h3>本实例</h3>
+        <ul>
+          <li><strong>服务地址</strong> · avater.juniortree.com</li>
+          <li><strong>运行方式</strong> · 自托管 Docker 容器</li>
+          <li><strong>审核引擎</strong> · 本地 ONNX 推理，内容不出域</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>开源项目</h3>
+        <ul>
+          <li><strong>源代码</strong> · <a href="https://github.com/liueic/avatar">github.com/liueic/avatar</a></li>
+          <li><strong>镜像</strong> · ghcr.io/liueic/avatar</li>
+          <li><strong>许可协议</strong> · MIT License</li>
+        </ul>
+      </div>
+    </div>
+    <div class="codeblock" style="margin-top: 24px;">
+<span class="comment"># 自行部署（Docker）</span><br>
+docker run -d --name avater \<br>
+&nbsp;&nbsp;-p 8080:8080 \<br>
+&nbsp;&nbsp;-e AVATER_ADMIN_TOKEN=<span class="hl">&lt;your-secret-token&gt;</span> \<br>
+&nbsp;&nbsp;-v $(pwd)/data:/data \<br>
+&nbsp;&nbsp;ghcr.io/liueic/avatar:latest
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>avater · 基于 MIT License 开源</span>
+    <span>
+      默认头像样式来自 <a href="https://www.dicebear.com">DiceBear</a>（CC0） ·
+      审核模型 <a href="https://huggingface.co/OwenElliott/image-safety-classifier-xs">image-safety-classifier-xs</a>（MIT）
+    </span>
+  </div>
+</footer>
+
+</body>
+</html>

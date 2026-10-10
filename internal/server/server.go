@@ -102,9 +102,7 @@ func New(d Deps) (*Server, error) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /avatar/{hash}", s.handleAvatar)
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r)
-	})
+	mux.HandleFunc("GET /{$}", s.handleLanding)
 	// Gravatar compatibility: /{hash} without the /avatar prefix (SPEC §4.1).
 	mux.HandleFunc("GET /{hash}", s.handleAvatar)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
