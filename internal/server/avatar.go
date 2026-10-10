@@ -370,21 +370,32 @@ func (s *Server) serveApproved(w http.ResponseWriter, r *http.Request, req *pars
 	}
 
 	key := fmt.Sprintf("%s/%d/%d", e.Hash, req.size, e.Rev)
+	ext := "jpg"
+	if e.ContentType == "image/png" {
+		ext = "png"
+	}
+	diskKey := s.scaledDisk.key(e.Hash, int64(req.size), e.Rev, ext)
+
 	data, ok := s.scaled.Get(key)
 	if !ok {
-		raw, err := s.blobs.Read(e.BlobPath)
-		if err != nil {
-			s.log.Error("read blob", "hash", e.Hash, "err", err)
-			s.serveDefault(w, r, req, false)
-			return
+		// Second cache line: scaled variants persist across restarts, so a
+		// repeat (hash, size) never re-decodes the 2048-wide original.
+		if data, ok = s.scaledDisk.get(diskKey); !ok {
+			raw, err := s.blobs.Read(e.BlobPath)
+			if err != nil {
+				s.log.Error("read blob", "hash", e.Hash, "err", err)
+				s.serveDefault(w, r, req, false)
+				return
+			}
+			data, err = scaleImage(raw, e.ContentType, req.size)
+			if err != nil {
+				s.log.Error("scale image", "hash", e.Hash, "err", err)
+				s.serveDefault(w, r, req, false)
+				return
+			}
+			s.scaledDisk.put(diskKey, data)
 		}
-		data, err = scaleImage(raw, e.ContentType, req.size)
-		if err != nil {
-			s.log.Error("scale image", "hash", e.Hash, "err", err)
-			s.serveDefault(w, r, req, false)
-			return
-		}
-		// Only small renders are memoized to bound memory (SPEC §14).
+		// Only small renders are memoized in memory to bound heap (SPEC §14).
 		if req.size <= 256 {
 			s.scaled.Put(key, data)
 		}

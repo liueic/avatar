@@ -35,7 +35,8 @@ dial_timeout   = "3s"
 tls_timeout    = "3s"
 rate_limit_rps = 10               # token bucket toward Gravatar
 token_wait     = "1s"             # fail fast when the bucket is empty (load shedding)
-fetch_size     = 2048             # s= used when pulling from upstream
+fetch_size     = 512              # s= pulled from upstream; 512 keeps decode cost low
+                                 # (large s= requests get a browser-upscaled image)
 
 [validate]
 max_dimension = 2048
@@ -71,6 +72,7 @@ pending_stale   = "24h"           # re-enqueue unreviewed entries
 clean_interval  = "10m"
 default_lru     = 1024
 max_negative_entries = 100000     # stop persisting misses beyond this (abuse guard)
+scaled_disk_max_bytes = 536870912 # 512 MB scaled-variant cache, LRU-pruned
 
 [cdn]
 provider          = "none"        # none | cloudflare | fastly

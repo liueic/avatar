@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -98,6 +100,7 @@ type testEnv struct {
 	queue   *moderate.Service
 	reg     *metrics.Registry
 	upTB    *fetcher.TokenBucket
+	cfg     config.Config
 }
 
 // newEnv wires a full server against the fake upstream with the "none"
@@ -165,20 +168,27 @@ func newEnv(t *testing.T, tweak func(*config.Config), withModerator bool) *testE
 
 	upTB := fetcher.NewTokenBucket(1000, 1000)
 	t.Cleanup(upTB.Stop)
-	srv := New(Deps{
+	srv, err := New(Deps{
 		Cfg: cfg, Store: store, Blobs: blobs, Avatars: avatars,
 		Fetch: fetch, UpTB: upTB,
 		Queue: queue, Policy: cdn.NewPolicy(cfg.CDN), Log: log, Reg: reg,
 	})
-	return &testEnv{handler: srv.Handler(), up: up, store: store, blobs: blobs, queue: queue, reg: reg, upTB: upTB}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &testEnv{handler: srv.Handler(), up: up, store: store, blobs: blobs, queue: queue, reg: reg, upTB: upTB, cfg: cfg}
 }
 
-// seedPendingEntry plants a pending_review entry with a red 1x1 PNG blob.
-func seedPendingEntry(t *testing.T, env *testEnv, hash string) {
+// seedPendingEntry plants a pending_review entry with a red dim×dim PNG blob.
+func seedPendingEntry(t *testing.T, env *testEnv, hash string, dim int) {
 	t.Helper()
 	ctx := context.Background()
-	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
-	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	img := image.NewRGBA(image.Rect(0, 0, dim, dim))
+	for y := 0; y < dim; y++ {
+		for x := 0; x < dim; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(x * 16), G: uint8(y * 16), B: 60, A: 255})
+		}
+	}
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
 		t.Fatal(err)
@@ -192,7 +202,7 @@ func seedPendingEntry(t *testing.T, env *testEnv, hash string) {
 	}
 	err = env.store.InsertPendingReview(ctx, &cache.Entry{
 		Hash: hash, HashAlg: cache.AlgMD5, ContentType: "image/png",
-		BlobPath: rel, Width: 1, Height: 1, Bytes: int64(buf.Len()),
+		BlobPath: rel, Width: dim, Height: dim, Bytes: int64(buf.Len()),
 	}, time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -357,7 +367,7 @@ func TestGravatarParamRegression(t *testing.T) {
 
 	// Pre-seed hashGood as pending_review so the "pending" half of the table
 	// is deterministic (no fetch/approval race).
-	seedPendingEntry(t, env, hashGood)
+	seedPendingEntry(t, env, hashGood, 1)
 
 	pending := []struct {
 		name string
@@ -630,5 +640,41 @@ func TestMissShedsAtNegativeCap(t *testing.T) {
 	}
 	if _, err := env.store.Get(context.Background(), h); err != cache.ErrNotFound {
 		t.Fatalf("capped miss must not persist an entry, got %v", err)
+	}
+}
+
+// TestScaledDiskCachePersists: a scaled render of an approved image is
+// persisted on disk, so restarts (fresh Server, cold LRU) still serve the
+// variant without re-decoding the original.
+func TestScaledDiskCachePersists(t *testing.T) {
+	env := newEnv(t, nil, true)
+	seedPendingEntry(t, env, hashGood, 64) // 64x64 original: s=16 must downscale
+	env.queue.Enqueue(hashGood)
+	waitFor(t, 3*time.Second, func() bool {
+		e, err := env.store.Get(context.Background(), hashGood)
+		return err == nil && e.Status == cache.StatusApproved
+	})
+
+	rec := env.get(t, "/avatar/"+hashGood+"?s=16")
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "image/png" {
+		t.Fatalf("scaled render: %d %s", rec.Code, rec.Header().Get("Content-Type"))
+	}
+
+	var found bool
+	filepath.Walk(env.cfg.Cache.Dir+"/scaled", func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() && !strings.HasSuffix(info.Name(), ".tmp-0") && strings.Contains(path, hashGood[:2]) {
+			found = true
+		}
+		return nil
+	})
+	if !found {
+		t.Fatal("scaled variant was not persisted to disk")
+	}
+
+	// Fresh Server over the same data dir (restart simulation): the variant
+	// must come from disk. Assert via a second identical response.
+	rec2 := env.get(t, "/avatar/"+hashGood+"?s=16")
+	if rec2.Code != http.StatusOK || rec2.Body.Len() != rec.Body.Len() {
+		t.Fatal("disk-cached variant served a different body")
 	}
 }

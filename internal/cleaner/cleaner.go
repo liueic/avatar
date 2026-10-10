@@ -151,9 +151,12 @@ func (c *Cleaner) RunOnce(ctx context.Context) error {
 		}
 	}
 
-	// 6. Default-avatar disk cache bound (abuse resilience).
+	// 6. Disk cache bounds for defaults and scaled variants (abuse resilience).
 	if err := c.PruneDefaultCache(); err != nil {
 		c.log.Warn("cleaner: defaults prune", "err", err)
+	}
+	if err := c.PruneScaledCache(); err != nil {
+		c.log.Warn("cleaner: scaled prune", "err", err)
 	}
 
 	// 7. SQLite housekeeping.
@@ -196,20 +199,45 @@ func (c *Cleaner) OrphanScan(ctx context.Context) error {
 // removed until usage drops to 90% of the cap (abuse resilience: random-hash
 // PNG floods would otherwise fill the disk).
 func (c *Cleaner) PruneDefaultCache() error {
-	root := filepath.Join(c.cfg.Cache.Dir, "defaults")
 	limit := c.cfg.DefaultAvatr.DiskMaxBytes
 	if limit <= 0 {
 		limit = 256 << 20
 	}
+	total, removed, err := pruneDir(filepath.Join(c.cfg.Cache.Dir, "defaults"), limit)
+	if removed > 0 {
+		c.log.Warn("cleaner: pruned default-avatar disk cache", "files", removed, "bytes_left", total)
+		c.reg.Counter("avater_cleaner_defaults_pruned_total", "Default-avatar cache files pruned", nil, float64(removed))
+	}
+	c.reg.Gauge("avater_defaults_cache_bytes", "Bytes cached for default avatars on disk", nil, float64(total))
+	return err
+}
 
+// PruneScaledCache bounds the scaled-variant disk cache ({cache.dir}/scaled)
+// at cache.scaled_disk_max_bytes (LRU by mtime).
+func (c *Cleaner) PruneScaledCache() error {
+	limit := c.cfg.Cache.ScaledDiskMaxBytes
+	if limit <= 0 {
+		limit = 512 << 20
+	}
+	total, removed, err := pruneDir(filepath.Join(c.cfg.Cache.Dir, "scaled"), limit)
+	if removed > 0 {
+		c.log.Warn("cleaner: pruned scaled-variant disk cache", "files", removed, "bytes_left", total)
+		c.reg.Counter("avater_cleaner_scaled_pruned_total", "Scaled-variant cache files pruned", nil, float64(removed))
+	}
+	c.reg.Gauge("avater_scaled_cache_bytes", "Bytes cached for scaled avatar variants on disk", nil, float64(total))
+	return err
+}
+
+// pruneDir removes oldest-mtime files until the directory total is at 90% of
+// limit. Returns the resulting total and removed file count.
+func pruneDir(root string, limit int64) (total int64, removed int, err error) {
 	type file struct {
 		path  string
 		size  int64
 		mtime time.Time
 	}
 	var files []file
-	var total int64
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !d.Type().IsRegular() {
 			return nil //nolint: walk errors on a cache dir are non-fatal
 		}
@@ -221,16 +249,14 @@ func (c *Cleaner) PruneDefaultCache() error {
 		total += info.Size()
 		return nil
 	})
-	if err != nil {
-		return err
+	if walkErr != nil {
+		return total, removed, walkErr
 	}
 	if total <= limit {
-		c.reg.Gauge("avater_defaults_cache_bytes", "Bytes cached for default avatars on disk", nil, float64(total))
-		return nil
+		return total, removed, nil
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].mtime.Before(files[j].mtime) })
 	target := limit * 9 / 10
-	removed := 0
 	for _, f := range files {
 		if total <= target {
 			break
@@ -240,10 +266,5 @@ func (c *Cleaner) PruneDefaultCache() error {
 			removed++
 		}
 	}
-	if removed > 0 {
-		c.log.Warn("cleaner: pruned default-avatar disk cache", "files", removed, "bytes_before", total)
-		c.reg.Counter("avater_cleaner_defaults_pruned_total", "Default-avatar cache files pruned", nil, float64(removed))
-	}
-	c.reg.Gauge("avater_defaults_cache_bytes", "Bytes cached for default avatars on disk", nil, float64(total))
-	return nil
+	return total, removed, nil
 }

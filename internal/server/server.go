@@ -3,6 +3,7 @@
 package server
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -43,6 +44,9 @@ type Server struct {
 
 	// scaledCache memoizes resized approved images for common small sizes.
 	scaled *avatar.LRU
+	// scaledDisk persists scaled variants across restarts (LRU is only the
+	// first line of caching; the cleaner prunes the disk layer).
+	scaledDisk *scaledDiskCache
 }
 
 // Deps bundles constructor dependencies.
@@ -60,7 +64,7 @@ type Deps struct {
 }
 
 // New assembles the server.
-func New(d Deps) *Server {
+func New(d Deps) (*Server, error) {
 	s := &Server{
 		cfg:     d.Cfg,
 		store:   d.Store,
@@ -79,7 +83,12 @@ func New(d Deps) *Server {
 		s.global = newLimiterSet(d.Cfg.RateLimit.GlobalRPS, d.Cfg.RateLimit.GlobalBurst, 4, d.Reg)
 		s.perIP = newLimiterSet(d.Cfg.RateLimit.PerIPRPS, d.Cfg.RateLimit.PerIPBurst, 200_000, d.Reg)
 	}
-	return s
+	sd, err := newScaledDiskCache(d.Cfg.Cache.Dir)
+	if err != nil {
+		return nil, fmt.Errorf("server: scaled disk cache: %w", err)
+	}
+	s.scaledDisk = sd
+	return s, nil
 }
 
 // Handler builds the public mux: Gravatar routes + health + optional metrics.

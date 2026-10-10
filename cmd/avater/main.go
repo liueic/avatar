@@ -114,7 +114,7 @@ func run() error {
 	}, log, reg, purger)
 	queue.Start()
 
-	srv := server.New(server.Deps{
+	srv, err := server.New(server.Deps{
 		Cfg:     cfg,
 		Store:   store,
 		Blobs:   blobs,
@@ -126,6 +126,9 @@ func run() error {
 		Log:     log,
 		Reg:     reg,
 	})
+	if err != nil {
+		return err
+	}
 
 	// Cleaner (SPEC §10.3).
 	cl := cleaner.New(cfg, store, blobs, queue, log, reg, srv)

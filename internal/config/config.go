@@ -94,6 +94,9 @@ type CacheConfig struct {
 	// MaxNegativeEntries bounds unbounded-growth abuse: random-hash floods
 	// stop persisting negative entries beyond this many unexpired ones.
 	MaxNegativeEntries int64 `toml:"max_negative_entries"`
+	// ScaledDiskMaxBytes bounds the scaled-variant disk cache the cleaner
+	// prunes (LRU by mtime).
+	ScaledDiskMaxBytes int64 `toml:"scaled_disk_max_bytes"`
 }
 
 type CDNConfig struct {
@@ -156,7 +159,7 @@ func Default() Config {
 	c.Upstream.TLSTimeout = 3 * time.Second
 	c.Upstream.RateLimitRPS = 10
 	c.Upstream.RateLimitBurst = 20
-	c.Upstream.FetchSize = 2048
+	c.Upstream.FetchSize = 512 // 16x cheaper decode than 2048; avatars are rarely shown larger
 	c.Upstream.TokenWait = time.Second
 
 	c.Validate.MaxDimension = 2048
@@ -190,6 +193,7 @@ func Default() Config {
 	c.Cache.CleanInterval = 10 * time.Minute
 	c.Cache.DefaultLRU = 1024
 	c.Cache.MaxNegativeEntries = 100_000
+	c.Cache.ScaledDiskMaxBytes = 512 << 20 // 512 MB
 
 	c.CDN.Provider = "none"
 	c.CDN.CacheTag = true

@@ -213,6 +213,9 @@ func (c *Config) applyEnv() error {
 	if err := i64("AVATER_CACHE_MAX_NEGATIVE_ENTRIES", &c.Cache.MaxNegativeEntries); err != nil {
 		return err
 	}
+	if err := i64("AVATER_CACHE_SCALED_DISK_MAX_BYTES", &c.Cache.ScaledDiskMaxBytes); err != nil {
+		return err
+	}
 
 	str("AVATER_CDN_PROVIDER", &c.CDN.Provider)
 	if err := boolean("AVATER_CDN_CACHE_TAG", &c.CDN.CacheTag); err != nil {
